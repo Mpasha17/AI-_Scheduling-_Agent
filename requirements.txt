@@ -1,0 +1,34 @@
+# LangChain core packages
+langchain>=0.0.267
+langchain-core>=0.0.10
+langchain-community>=0.0.10
+langchain-experimental>=0.0.10
+langchain-mistralai>=0.0.1
+langchain-text-splitters>=0.0.1
+langchain-chroma>=0.0.1
+langchain-huggingface>=0.0.1
+langchain-openai>=0.0.2
+langchain-google-genai>=0.0.1
+langchain-anthropic>=0.0.1
+langchain-cohere>=0.0.1
+langchain-together>=0.0.1
+langchain-fireworks>=0.0.1
+langchain-groq>=0.0.1
+langchain-nvidia-ai-endpoints>=0.0.1
+
+# LLM SDKs
+mistralai>=0.0.1
+
+# App + Data tools
+streamlit>=1.24.0
+pandas>=1.5.3
+numpy>=1.24.3
+python-dotenv>=1.0.0
+faiss-cpu>=1.7.4
+openpyxl>=3.1.2
+reportlab>=4.0.4
+
+# Validation + utilities
+email-validator>=2.0.0
+phonenumbers>=8.13.0
+pytz>=2023.3
