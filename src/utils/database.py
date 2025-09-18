@@ -5,6 +5,7 @@ from datetime import datetime
 import logging
 from ..config import DATABASE_PATH
 from ..models.patient import Patient
+from ..models.appointment import Doctor
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ def initialize_database():
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     # Create patients table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS patients (
@@ -38,7 +39,7 @@ def initialize_database():
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
     ''')
-    
+
     # Create doctors table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS doctors (
@@ -50,7 +51,18 @@ def initialize_database():
         phone TEXT
     )
     ''')
-    
+
+    # Create doctor_availability table
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS doctor_availability (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        doctor_id INTEGER NOT NULL,
+        available_date TEXT NOT NULL,
+        available_slots TEXT NOT NULL,
+        FOREIGN KEY (doctor_id) REFERENCES doctors (id)
+    )
+    ''')
+
     # Create appointments table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS appointments (
@@ -68,7 +80,7 @@ def initialize_database():
         FOREIGN KEY (doctor_id) REFERENCES doctors (id)
     )
     ''')
-    
+
     # Create insurance table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS insurance (
@@ -82,7 +94,7 @@ def initialize_database():
         FOREIGN KEY (patient_id) REFERENCES patients (id)
     )
     ''')
-    
+
     # Create reminders table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS reminders (
@@ -96,7 +108,7 @@ def initialize_database():
         FOREIGN KEY (appointment_id) REFERENCES appointments (id)
     )
     ''')
-    
+
     # Create forms table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS forms (
@@ -111,7 +123,7 @@ def initialize_database():
         FOREIGN KEY (patient_id) REFERENCES patients (id)
     )
     ''')
-    
+
     conn.commit()
     conn.close()
     logger.info("Database initialized successfully")
@@ -122,11 +134,11 @@ def find_patient(first_name=None, last_name=None, date_of_birth=None, patient_id
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     query = "SELECT * FROM patients WHERE "
     conditions = []
     params = []
-    
+
     if patient_id:
         conditions.append("id = ?")
         params.append(patient_id)
@@ -139,35 +151,69 @@ def find_patient(first_name=None, last_name=None, date_of_birth=None, patient_id
     if date_of_birth:
         conditions.append("date_of_birth = ?")
         params.append(date_of_birth)
-    
+
     if not conditions:
         return None
-    
+
     query += " AND ".join(conditions)
     cursor.execute(query, params)
     patient = cursor.fetchone()
     conn.close()
-    
+
     return dict(patient) if patient else None
 
-def create_patient(first_name, last_name, date_of_birth, email=None, phone=None, address=None):
+def create_patient(patient: Patient):
     """
     Create a new patient record
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     cursor.execute('''
     INSERT INTO patients (first_name, last_name, date_of_birth, email, phone, address)
     VALUES (?, ?, ?, ?, ?, ?)
-    ''', (first_name, last_name, date_of_birth, email, phone, address))
-    
+    ''', (patient.first_name, patient.last_name, patient.date_of_birth, patient.email, patient.phone, patient.address))
+
     patient_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    
+
     logger.info(f"Created new patient with ID: {patient_id}")
     return patient_id
+
+def create_doctor(doctor: Doctor):
+    """
+    Create a new doctor record
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+    INSERT INTO doctors (first_name, last_name, specialty, email, phone)
+    VALUES (?, ?, ?, ?, ?)
+    ''', (doctor.first_name, doctor.last_name, doctor.specialty, doctor.email, doctor.phone))
+
+    doctor_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+
+    logger.info(f"Created new doctor with ID: {doctor_id}")
+    return doctor_id
+
+def add_doctor_availability(doctor_id, available_date, available_slots):
+    """
+    Add doctor availability to the database
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+    INSERT INTO doctor_availability (doctor_id, available_date, available_slots)
+    VALUES (?, ?, ?)
+    ''', (doctor_id, available_date, ','.join(available_slots)))
+
+    conn.commit()
+    conn.close()
 
 def get_doctor_availability(doctor_id, date):
     """
@@ -175,54 +221,54 @@ def get_doctor_availability(doctor_id, date):
     """
     # In a real implementation, this would query the doctor's schedule
     # For this demo, we'll use a simple approach with fixed hours
-    
+
     # Get existing appointments for this doctor on this date
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     cursor.execute('''
-    SELECT appointment_time, duration 
-    FROM appointments 
+    SELECT appointment_time, duration
+    FROM appointments
     WHERE doctor_id = ? AND appointment_date = ? AND status != 'cancelled'
     ''', (doctor_id, date))
-    
+
     booked_slots = cursor.fetchall()
     conn.close()
-    
+
     # Define working hours (9 AM to 5 PM)
     working_hours = {
         'start': 9,  # 9 AM
         'end': 17    # 5 PM
     }
-    
+
     # Generate all possible time slots (30-minute intervals)
     all_slots = []
     for hour in range(working_hours['start'], working_hours['end']):
         for minute in [0, 30]:
             time_str = f"{hour:02d}:{minute:02d}"
             all_slots.append(time_str)
-    
+
     # Remove booked slots
     available_slots = all_slots.copy()
     for appointment in booked_slots:
         time_str = appointment['appointment_time']
         duration = appointment['duration']
-        
+
         # Convert time string to hour and minute
         hour, minute = map(int, time_str.split(':'))
-        
+
         # Calculate how many 30-minute slots this appointment takes
         num_slots = duration // 30
-        
+
         # Remove all affected slots
         for i in range(num_slots):
             slot_hour = hour + (minute + i * 30) // 60
             slot_minute = (minute + i * 30) % 60
             slot = f"{slot_hour:02d}:{slot_minute:02d}"
-            
+
             if slot in available_slots:
                 available_slots.remove(slot)
-    
+
     return available_slots
 
 def create_appointment(patient_id, doctor_id, appointment_date, appointment_time, duration, notes=None):
@@ -231,16 +277,16 @@ def create_appointment(patient_id, doctor_id, appointment_date, appointment_time
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     cursor.execute('''
     INSERT INTO appointments (patient_id, doctor_id, appointment_date, appointment_time, duration, notes)
     VALUES (?, ?, ?, ?, ?, ?)
     ''', (patient_id, doctor_id, appointment_date, appointment_time, duration, notes))
-    
+
     appointment_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    
+
     logger.info(f"Created new appointment with ID: {appointment_id}")
     return appointment_id
 
@@ -250,15 +296,15 @@ def save_insurance_info(patient_id, carrier, member_id, group_id=None):
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     # Check if insurance info already exists for this patient
     cursor.execute("SELECT id FROM insurance WHERE patient_id = ?", (patient_id,))
     existing = cursor.fetchone()
-    
+
     if existing:
         # Update existing record
         cursor.execute('''
-        UPDATE insurance 
+        UPDATE insurance
         SET carrier = ?, member_id = ?, group_id = ?, updated_at = CURRENT_TIMESTAMP
         WHERE patient_id = ?
         ''', (carrier, member_id, group_id, patient_id))
@@ -270,10 +316,10 @@ def save_insurance_info(patient_id, carrier, member_id, group_id=None):
         VALUES (?, ?, ?, ?)
         ''', (patient_id, carrier, member_id, group_id))
         insurance_id = cursor.lastrowid
-    
+
     conn.commit()
     conn.close()
-    
+
     logger.info(f"Saved insurance info for patient ID: {patient_id}")
     return insurance_id
 
@@ -283,35 +329,35 @@ def schedule_reminders(appointment_id, reminder_days):
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     # Get appointment details
     cursor.execute("SELECT appointment_date FROM appointments WHERE id = ?", (appointment_id,))
     appointment = cursor.fetchone()
-    
+
     if not appointment:
         conn.close()
         logger.error(f"Appointment with ID {appointment_id} not found")
         return False
-    
+
     appointment_date = datetime.strptime(appointment['appointment_date'], "%Y-%m-%d")
-    
+
     # Schedule reminders for each day in reminder_days
     reminder_ids = []
     for days in reminder_days:
         reminder_date = appointment_date - pd.Timedelta(days=days)
         reminder_time = "09:00"  # Send reminders at 9 AM
         scheduled_time = f"{reminder_date.strftime('%Y-%m-%d')} {reminder_time}"
-        
+
         cursor.execute('''
         INSERT INTO reminders (appointment_id, reminder_type, scheduled_time)
         VALUES (?, ?, ?)
         ''', (appointment_id, f"{days}-day", scheduled_time))
-        
+
         reminder_ids.append(cursor.lastrowid)
-    
+
     conn.commit()
     conn.close()
-    
+
     logger.info(f"Scheduled {len(reminder_ids)} reminders for appointment ID: {appointment_id}")
     return reminder_ids
 
@@ -320,10 +366,10 @@ def export_appointments_to_excel(output_path=None):
     Export all appointments to an Excel file
     """
     conn = get_db_connection()
-    
+
     # Query to get appointment details with patient and doctor information
     query = '''
-    SELECT 
+    SELECT
         a.id as appointment_id,
         a.appointment_date,
         a.appointment_time,
@@ -347,19 +393,19 @@ def export_appointments_to_excel(output_path=None):
     LEFT JOIN insurance i ON p.id = i.patient_id
     ORDER BY a.appointment_date, a.appointment_time
     '''
-    
+
     # Read query results into a pandas DataFrame
     df = pd.read_sql_query(query, conn)
     conn.close()
-    
+
     # Generate output path if not provided
     if not output_path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = f"appointments_export_{timestamp}.xlsx"
-    
+
     # Export to Excel
     df.to_excel(output_path, index=False)
-    
+
     logger.info(f"Exported {len(df)} appointments to {output_path}")
     return output_path
 
@@ -369,16 +415,16 @@ def load_synthetic_data():
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     # Check if we already have data
     cursor.execute("SELECT COUNT(*) as count FROM doctors")
     doctor_count = cursor.fetchone()['count']
-    
+
     if doctor_count > 0:
         conn.close()
         logger.info("Synthetic data already loaded")
         return
-    
+
     # Insert sample doctors
     doctors = [
         ('John', 'Smith', 'Family Medicine', 'john.smith@example.com', '555-123-4567'),
@@ -387,17 +433,17 @@ def load_synthetic_data():
         ('Emily', 'Brown', 'Dermatology', 'emily.brown@example.com', '555-456-7890'),
         ('David', 'Jones', 'Orthopedics', 'david.jones@example.com', '555-567-8901')
     ]
-    
+
     cursor.executemany('''
     INSERT INTO doctors (first_name, last_name, specialty, email, phone)
     VALUES (?, ?, ?, ?, ?)
     ''', doctors)
-    
+
     conn.commit()
     conn.close()
-    
+
     logger.info("Loaded synthetic doctor data")
-    
+
     # Note: Patient data will be generated separately in generate_data.py
 
 def get_patient_by_name_dob(first_name, last_name, date_of_birth):
@@ -406,15 +452,15 @@ def get_patient_by_name_dob(first_name, last_name, date_of_birth):
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     cursor.execute("""
-    SELECT * FROM patients 
+    SELECT * FROM patients
     WHERE LOWER(first_name) = LOWER(?) AND LOWER(last_name) = LOWER(?) AND date_of_birth = ?
     """, (first_name, last_name, date_of_birth))
-    
+
     patient = cursor.fetchone()
     conn.close()
-    
+
     if patient:
         return dict(patient)
     return None
@@ -425,11 +471,11 @@ def get_doctor_by_id(doctor_id):
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     cursor.execute("SELECT * FROM doctors WHERE id = ?", (doctor_id,))
     doctor = cursor.fetchone()
     conn.close()
-    
+
     if doctor:
         return dict(doctor)
     return None
@@ -440,11 +486,11 @@ def get_patient_by_id(patient_id):
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     cursor.execute("SELECT * FROM patients WHERE id = ?", (patient_id,))
     patient = cursor.fetchone()
     conn.close()
-    
+
     if patient:
         return dict(patient)
     return None
@@ -461,23 +507,23 @@ def update_appointment_status(appointment_id, status, notes=None):
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     if notes:
         cursor.execute("""
-        UPDATE appointments 
-        SET status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP 
+        UPDATE appointments
+        SET status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """, (status, notes, appointment_id))
     else:
         cursor.execute("""
-        UPDATE appointments 
-        SET status = ?, updated_at = CURRENT_TIMESTAMP 
+        UPDATE appointments
+        SET status = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """, (status, appointment_id))
-    
+
     conn.commit()
     conn.close()
-    
+
     logger.info(f"Updated appointment {appointment_id} status to {status}")
     return True
 
@@ -487,16 +533,16 @@ def create_form(patient_id, form_type):
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     cursor.execute("""
     INSERT INTO forms (patient_id, form_type, sent_at)
     VALUES (?, ?, CURRENT_TIMESTAMP)
     """, (patient_id, form_type))
-    
+
     form_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    
+
     logger.info(f"Created form {form_type} for patient {patient_id}")
     return form_id
 
@@ -505,10 +551,10 @@ def export_appointment_to_excel(appointment_id, output_path=None):
     Export a specific appointment to Excel
     """
     conn = get_db_connection()
-    
+
     # Query to get appointment details with patient and doctor information
     query = f"""
-    SELECT 
+    SELECT
         a.id as appointment_id,
         a.appointment_date,
         a.appointment_time,
@@ -532,52 +578,21 @@ def export_appointment_to_excel(appointment_id, output_path=None):
     LEFT JOIN insurance i ON p.id = i.patient_id
     WHERE a.id = {appointment_id}
     """
-    
+
     # Read query results into a pandas DataFrame
     df = pd.read_sql_query(query, conn)
     conn.close()
-    
+
     # Generate output path if not provided
     if not output_path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = f"appointment_{appointment_id}_{timestamp}.xlsx"
-    
+
     # Export to Excel
     df.to_excel(output_path, index=False)
-    
+
     logger.info(f"Exported appointment {appointment_id} to {output_path}")
     return output_path
-
-def get_patient_by_name_dob(first_name, last_name, date_of_birth):
-    """
-    Get a patient by name and date of birth
-    """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    query = """
-    SELECT * FROM patients 
-    WHERE first_name = ? AND last_name = ? AND date_of_birth = ?
-    """
-    
-    cursor.execute(query, (first_name, last_name, date_of_birth))
-    row = cursor.fetchone()
-    
-    if row:
-        patient = Patient(
-            id=row['id'],
-            first_name=row['first_name'],
-            last_name=row['last_name'],
-            date_of_birth=row['date_of_birth'],
-            email=row['email'],
-            phone=row['phone'],
-            address=row['address']
-        )
-        conn.close()
-        return patient
-    
-    conn.close()
-    return None
 
 # Initialize the database when this module is imported
 initialize_database()
